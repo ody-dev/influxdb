@@ -173,20 +173,6 @@ logger('Request completed', [
 
 This allows you to query InfluxDB for all logs related to a specific request.
 
-## Multi-Environment Configuration
-
-For multi-environment deployments, configure each environment separately:
-
-```
-# Development .env
-INFLUXDB_URL=http://127.0.0.0.1:8086
-INFLUXDB_BUCKET=logs_dev
-
-# Production .env
-INFLUXDB_URL=https://influxdb.example.com
-INFLUXDB_BUCKET=logs_prod
-```
-
 ## License
 
 MIT
