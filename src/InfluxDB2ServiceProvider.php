@@ -9,7 +9,7 @@
 namespace Ody\InfluxDB;
 
 use InfluxDB2\Client;
-use Ody\Foundation\Logging\LogManager;
+use Ody\Logger\LogManager;
 use Ody\Foundation\Providers\ServiceProvider;
 use Ody\InfluxDB\Logging\InfluxDB2Logger;
 
