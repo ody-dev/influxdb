@@ -27,9 +27,17 @@ class InfluxDB2ServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        // Register the driver name with the LogManager
+        // Register the InfluxDB\Logging namespace for auto-discovery
         $this->container->make(LogManager::class)->registerDriver('influxdb', InfluxDB2Logger::class);
+    }
 
+    /**
+     * Bootstrap the service provider
+     *
+     * @return void
+     */
+    public function boot(): void
+    {
         // Register InfluxDB client as a singleton for dependency injection
         $this->singleton(Client::class, function () {
             $config = $this->container->make('config');
@@ -44,25 +52,5 @@ class InfluxDB2ServiceProvider extends ServiceProvider
 
             return new Client($options);
         });
-    }
-
-    /**
-     * Bootstrap the service provider
-     *
-     * @return void
-     */
-    public function boot(): void
-    {
-        // Register the InfluxDB\Logging namespace for auto-discovery
-        if ($this->container->has(LogManager::class)) {
-            $this->container->make(LogManager::class)->registerNamespace('Ody\\InfluxDB\\Logging\\');
-        }
-
-        // Publish configuration if we're in a Laravel-like environment
-        if (method_exists($this, 'publishes')) {
-            $this->publishes([
-                __DIR__ . '/../config/influxdb.php' => config_path('influxdb.php'),
-            ], 'config');
-        }
     }
 }
