@@ -17,6 +17,7 @@ use Ody\Logger\AbstractLogger;
 use Ody\Logger\FormatterInterface;
 use Ody\Logger\JsonFormatter;
 use Ody\Logger\LineFormatter;
+use Ody\Swoole\Coroutine\ContextManager;
 use Psr\Log\LoggerInterface;
 use Psr\Log\LogLevel;
 use Swoole\Coroutine;
@@ -64,6 +65,31 @@ class InfluxDB2Logger extends AbstractLogger
     protected bool $useCoroutines = false;
 
     /**
+     * @var bool Whether we're running in a Swoole environment
+     */
+    protected bool $isSwooleEnv = false;
+
+    /**
+     * @var int Flush interval in milliseconds
+     */
+    protected int $flushInterval = 1000;
+
+    /**
+     * @var int Batch size
+     */
+    protected int $batchSize = 1000;
+
+    /**
+     * @var array Pending points to write
+     */
+    protected array $pendingPoints = [];
+
+    /**
+     * @var int Last flush time
+     */
+    protected int $lastFlushTime = 0;
+
+    /**
      * Constructor
      *
      * @param Client $client InfluxDB client instance
@@ -92,14 +118,29 @@ class InfluxDB2Logger extends AbstractLogger
         $this->bucket = $bucket;
         $this->measurement = $measurement;
         $this->defaultTags = $defaultTags;
-        $this->useCoroutines = $useCoroutines && extension_loaded('swoole');
+        $this->isSwooleEnv = $useCoroutines;
+        $this->useCoroutines = $useCoroutines;
+        $this->lastFlushTime = time() * 1000; // Current time in milliseconds
 
-        // Get write API with batching options
-        $this->writeApi = $this->client->createWriteApi([
-            'writeType' => WriteType::BATCHING,
-            'batchSize' => 1000,
-            'flushInterval' => 1000
-        ]);
+        // Get write API with batching options - use different settings for Swoole
+        if ($this->isSwooleEnv) {
+            // For Swoole, we'll manage our own batching to avoid issues with coroutines
+            $this->writeApi = $this->client->createWriteApi([
+                'writeType' => WriteType::SYNCHRONOUS, // Use synchronous writes in Swoole
+                'debug' => env('APP_DEBUG', false)
+            ]);
+        } else {
+            // Standard batching for non-Swoole environments
+            $this->writeApi = $this->client->createWriteApi([
+                'writeType' => WriteType::BATCHING,
+                'batchSize' => $this->batchSize,
+                'flushInterval' => $this->flushInterval,
+                'debug' => env('APP_DEBUG', false)
+            ]);
+        }
+
+        // Register shutdown function to ensure logs are flushed
+        register_shutdown_function([$this, 'flush']);
     }
 
     /**
@@ -134,7 +175,8 @@ class InfluxDB2Logger extends AbstractLogger
             "token" => $config['token'],
             "bucket" => $config['bucket'],
             "org" => $config['org'],
-            "precision" => $config['precision'] ?? WritePrecision::S
+            "precision" => $config['precision'] ?? WritePrecision::S,
+            "debug" => $config['debug'] ?? false,
         ]);
 
         // Default tags
@@ -222,8 +264,32 @@ class InfluxDB2Logger extends AbstractLogger
      */
     public function useCoroutines(bool $enable): self
     {
-        $this->useCoroutines = $enable && extension_loaded('swoole');
+        $this->useCoroutines = $enable && $this->isSwooleEnv;
         return $this;
+    }
+
+    /**
+     * Flush all pending points to InfluxDB
+     */
+    public function flush(): void
+    {
+        try {
+            // If we're in Swoole and have pending points, flush them directly
+            if ($this->isSwooleEnv && !empty($this->pendingPoints)) {
+                $pointCount = count($this->pendingPoints);
+                if ($pointCount > 0) {
+                    error_log("InfluxDB2Logger: Flushing {$pointCount} pending points");
+                    $this->writeApi->write($this->pendingPoints);
+                    $this->pendingPoints = [];
+                    $this->lastFlushTime = time() * 1000;
+                }
+            }
+
+            // Close the write API to flush any remaining points in the buffer
+            $this->writeApi->close();
+        } catch (Throwable $e) {
+            error_log('Error flushing InfluxDB data: ' . $e->getMessage());
+        }
     }
 
     /**
@@ -231,12 +297,55 @@ class InfluxDB2Logger extends AbstractLogger
      */
     public function __destruct()
     {
-        // Flush any remaining points in the buffer
-        try {
-            $this->writeApi->close();
-        } catch (Throwable $e) {
-            error_log('Error closing InfluxDB write API: ' . $e->getMessage());
+        $this->flush();
+    }
+
+    /**
+     * Get IP address from Swoole context or server params
+     *
+     * @return string
+     */
+    protected function getClientIp(): string
+    {
+        // Try to get IP from Swoole coroutine context
+        if ($this->isSwooleEnv && class_exists('\Ody\Swoole\Coroutine\ContextManager')) {
+            $serverParams = ContextManager::get('_SERVER');
+
+            if (is_array($serverParams)) {
+                // Try common IP address headers and variables
+                if (!empty($serverParams['remote_addr'])) {
+                    return $serverParams['remote_addr'];
+                }
+
+                if (!empty($serverParams['HTTP_X_FORWARDED_FOR'])) {
+                    // X-Forwarded-For may contain multiple IPs, take the first one
+                    $ips = explode(',', $serverParams['HTTP_X_FORWARDED_FOR']);
+                    return trim($ips[0]);
+                }
+
+                if (!empty($serverParams['HTTP_CLIENT_IP'])) {
+                    return $serverParams['HTTP_CLIENT_IP'];
+                }
+            }
         }
+
+        // Fallback to regular server params if not in Swoole
+        if (!$this->isSwooleEnv) {
+            if (!empty($_SERVER['REMOTE_ADDR'])) {
+                return $_SERVER['REMOTE_ADDR'];
+            }
+
+            if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+                $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+                return trim($ips[0]);
+            }
+
+            if (!empty($_SERVER['HTTP_CLIENT_IP'])) {
+                return $_SERVER['HTTP_CLIENT_IP'];
+            }
+        }
+
+        return 'unknown';
     }
 
     /**
@@ -253,8 +362,40 @@ class InfluxDB2Logger extends AbstractLogger
             $point->addTag($key, (string)$value);
         }
 
-        // Add message as a field
-        $point->addField('message', $message);
+        // Format the message with context if it's empty or generic
+        $formattedMessage = $message;
+
+        // Check if message is empty or a generic one from the framework
+        $genericMessages = [
+            'Request started',
+            'Request completed',
+            'Request failed'
+        ];
+
+        if (empty(trim($message)) || in_array($message, $genericMessages)) {
+            // For request logs, create a meaningful message
+            if (isset($context['method']) && isset($context['uri'])) {
+                $formattedMessage = "{$context['method']} {$context['uri']}";
+
+                // Add status if available
+                if (isset($context['status'])) {
+                    $formattedMessage .= " - {$context['status']}";
+
+                    // Add duration if available
+                    if (isset($context['duration'])) {
+                        $formattedMessage .= " ({$context['duration']})";
+                    }
+                }
+            }
+        }
+
+        // Always provide a non-empty message
+        if (empty(trim($formattedMessage))) {
+            $formattedMessage = "Log entry at " . date('Y-m-d H:i:s');
+        }
+
+        // Add the formatted message as a field
+        $point->addField('message', $formattedMessage);
 
         // Extract error information if available
         if (isset($context['error']) && $context['error'] instanceof Throwable) {
@@ -272,6 +413,11 @@ class InfluxDB2Logger extends AbstractLogger
             }
         }
 
+        // Handle IP address - if it's unknown, try to get it from Swoole context
+        if (isset($context['ip']) && $context['ip'] === 'unknown') {
+            $context['ip'] = $this->getClientIp();
+        }
+
         // Add other context fields, excluding 'tags' and 'error' which are handled separately
         foreach ($context as $key => $value) {
             if ($key !== 'tags' && $key !== 'error') {
@@ -287,18 +433,44 @@ class InfluxDB2Logger extends AbstractLogger
             }
         }
 
-        // Write the point - use coroutines if enabled
-        if ($this->useCoroutines && Coroutine::getCid() >= 0) {
-            // Use Swoole coroutine for non-blocking writes
-            Coroutine::create(function () use ($point) {
+        error_log('------------ Influx write ---------------');
+
+        // Handle differently depending on environment
+        if ($this->isSwooleEnv) {
+            // In Swoole, add to our pending points and flush if needed
+            $this->pendingPoints[] = $point;
+
+            // Check if we should flush based on batch size or time
+            $currentTime = time() * 1000;
+            $timeElapsed = $currentTime - $this->lastFlushTime;
+
+            if (count($this->pendingPoints) >= $this->batchSize || $timeElapsed >= $this->flushInterval) {
+                // Flush immediately in the current context
                 try {
-                    $this->writeApi->write($point);
+                    error_log("Immediate flush of " . count($this->pendingPoints) . " points");
+                    $this->writeApi->write($this->pendingPoints);
+                    $this->pendingPoints = [];
+                    $this->lastFlushTime = $currentTime;
                 } catch (Throwable $e) {
                     error_log('Error writing to InfluxDB: ' . $e->getMessage());
                 }
-            });
+            }
+
+            // Schedule a delayed flush for any remaining points
+            // This ensures that logs get written even if batch size isn't reached
+            if ($this->useCoroutines && Coroutine::getCid() >= 0 && !empty($this->pendingPoints)) {
+                // Use coroutine to flush remaining points after the request completes
+                Coroutine::create(function () {
+                    // Small delay to allow request to complete
+                    usleep(100000); // 100ms
+                    if (!empty($this->pendingPoints)) {
+                        error_log("Delayed flush of " . count($this->pendingPoints) . " points from coroutine");
+                        $this->flush();
+                    }
+                });
+            }
         } else {
-            // Synchronous write
+            // In regular PHP, use the batching API as normal
             try {
                 $this->writeApi->write($point);
             } catch (Throwable $e) {

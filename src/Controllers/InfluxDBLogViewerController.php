@@ -116,22 +116,31 @@ class InfluxDBLogViewerController
             $logs = [];
             foreach ($tables as $table) {
                 foreach ($table->records as $record) {
-                    $key = $record->getTime() . '_' . ($record->values["service"] ?? 'unknown');
+                    // Build a unique key based on timestamp and service
+                    $time = $record->getTime();
+                    $service = $record->values["service"] ?? 'unknown';
+                    $key = $time . '_' . $service;
 
+                    // Initialize the log entry if it doesn't exist yet
                     if (!isset($logs[$key])) {
                         $logs[$key] = [
-                            'timestamp' => $record->getTime(),
+                            'timestamp' => $time,
                             'level' => $record->values["level"] ?? 'unknown',
-                            'service' => $record->values["service"] ?? 'unknown',
-                            'message' => $record->values["message"] ?? '',
+                            'service' => $service,
+                            'message' => '',  // Initialize with empty message
                             'context' => []
                         ];
                     }
 
-                    // Add field to context if it's not a standard field
+                    // Handle the current field
                     $fieldName = $record->getField();
-                    if (!in_array($fieldName, ['message', 'level', 'service', '_time', '_measurement', '_field', '_value'])) {
-                        $logs[$key]['context'][$fieldName] = $record->getValue();
+                    $fieldValue = $record->getValue();
+
+                    // Assign the field to the appropriate place in the log entry
+                    if ($fieldName === 'message') {
+                        $logs[$key]['message'] = $fieldValue;
+                    } elseif (!in_array($fieldName, ['level', 'service', '_time', '_measurement', '_field', '_value'])) {
+                        $logs[$key]['context'][$fieldName] = $fieldValue;
                     }
                 }
             }
