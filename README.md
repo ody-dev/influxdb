@@ -1,14 +1,6 @@
 # InfluxDB2 Logger for ODY Framework
 
-A custom logging solution for ODY Framework that stores logs in InfluxDB 2.x, a time-series database designed for high-write and query loads.
-
-## Features
-
-- Store logs in InfluxDB 2.x with efficient time series format
-- Support for tagging logs for powerful querying and filtering
-- Asynchronous logging with Swoole coroutines for high performance
-- Configurable measurement names, tags, and fields
-- Seamless integration with ODY Framework logging system
+A custom logging solution for ODY Framework that stores logs in InfluxDB 2.x.
 
 ## Installation
 
@@ -89,8 +81,6 @@ logger('System started');
 
 ### Using Tags for Better Querying
 
-Tags in InfluxDB are indexed, making filtering by tags very efficient:
-
 ```php
 // Log with custom tags
 logger('API request processed', [
@@ -105,8 +95,6 @@ logger('API request processed', [
 ```
 
 ### Dependency Injection
-
-You can also inject the logger directly:
 
 ```php
 use Psr\Log\LoggerInterface;
@@ -184,53 +172,6 @@ logger('Request completed', [
 ```
 
 This allows you to query InfluxDB for all logs related to a specific request.
-
-## Querying Logs
-
-You can query your logs directly in InfluxDB using Flux or InfluxQL. Here are some examples:
-
-### Get recent logs:
-
-```flux
-from(bucket: "logs")
-  |> range(start: -1h)
-  |> filter(fn: (r) => r._measurement == "logs")
-  |> sort(columns: ["_time"], desc: true)
-  |> limit(n: 100)
-```
-
-### Filter by level:
-
-```flux
-from(bucket: "logs")
-  |> range(start: -1h)
-  |> filter(fn: (r) => r._measurement == "logs")
-  |> filter(fn: (r) => r.level == "error")
-```
-
-### Filter by custom tag:
-
-```flux
-from(bucket: "logs")
-  |> range(start: -1h)
-  |> filter(fn: (r) => r._measurement == "logs")
-  |> filter(fn: (r) => r.method == "GET")
-  |> filter(fn: (r) => r.status == "404")
-```
-
-## Multi-Environment Configuration
-
-For multi-environment deployments, configure each environment separately:
-
-```
-# Development .env
-INFLUXDB_URL=http://127.0.0.0.1:8086
-INFLUXDB_BUCKET=logs_dev
-
-# Production .env
-INFLUXDB_URL=https://influxdb.example.com
-INFLUXDB_BUCKET=logs_prod
-```
 
 ## License
 
