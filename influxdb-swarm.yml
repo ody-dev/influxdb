@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  influxdb:
+    image: influxdb:2.7  # Using InfluxDB 2.7 - adjust version as needed
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    environment:
+      # InfluxDB 2.x setup variables
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_USERNAME:-admin}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_PASSWORD:-password12345} # Needs 8+ chars
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_ORG:-odyorganization}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_BUCKET:-logs}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_TOKEN:-mytoken}
+      # Optional: Configure retention
+      - DOCKER_INFLUXDB_INIT_RETENTION=${INFLUXDB_RETENTION:-0} # 0=infinite
+    ports:
+      - "8086:8086"  # HTTP API and UI
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    networks:
+      - influxdb_network
+
+volumes:
+  influxdb_data:
+    driver: local
+
+networks:
+  influxdb_network:
+    driver: overlay
+    attachable: true
