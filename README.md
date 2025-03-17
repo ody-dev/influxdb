@@ -1,5 +1,8 @@
 # InfluxDB2 Logger for ODY Framework
 
+⚠️ **IMPORTANT**: This repository is automatically generated from the [ody repo](https://github.com/ody-dev/ody) and is
+read-only.
+
 A custom logging solution for ODY Framework that stores logs in InfluxDB 2.x.
 
 ## Installation
