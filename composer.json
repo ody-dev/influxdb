@@ -13,7 +13,7 @@
   "require": {
     "php": ">=8.3",
     "influxdata/influxdb-client-php": "^3.0",
-    "ody/logger": ">=0.1.0",
+    "ody/logger": "^0.1.0",
     "psr/log": "^3.0",
     "php-http/guzzle7-adapter": "^1.1",
     "php-http/curl-client": "^2.3"
