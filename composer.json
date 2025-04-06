@@ -3,7 +3,14 @@
   "description": "InfluxDB 2.x logging integration for ODY Framework",
   "type": "library",
   "license": "MIT",
-  "keywords": ["ody", "logging", "influxdb", "influxdb2", "time-series", "metrics"],
+  "keywords": [
+    "ody",
+    "logging",
+    "influxdb",
+    "influxdb2",
+    "time-series",
+    "metrics"
+  ],
   "authors": [
     {
       "name": "Ilyas Deckers",
@@ -13,7 +20,7 @@
   "require": {
     "php": ">=8.3",
     "influxdata/influxdb-client-php": "^3.0",
-    "ody/logger": "^0.1.0",
+    "ody/logger": "^0.2.0",
     "psr/log": "^3.0",
     "php-http/guzzle7-adapter": "^1.1",
     "php-http/curl-client": "^2.3"
@@ -44,5 +51,6 @@
     "fix-style": "phpcbf"
   },
   "minimum-stability": "dev",
-  "prefer-stable": true
+  "prefer-stable": true,
+  "version": "0.1.0"
 }
